@@ -68,6 +68,8 @@ class DeferredExecutionContext(ExecutionContext):
         results: AwaitableOrValue[Dict[str, Any]] = {}
 
         unresolved = 0
+        future = SyncFuture()
+
         for response_name, field_nodes in fields.items():
             field_path = Path(path, response_name, parent_type.name)
             result = _resolve_promise(self.execute_field(
@@ -107,7 +109,6 @@ class DeferredExecutionContext(ExecutionContext):
         if not unresolved:
             return results
 
-        future = SyncFuture()
         return future
 
     execute_fields = execute_fields_serially
