@@ -21,7 +21,7 @@ try:
 except ImportError:
     Promise = None
 
-from .sync_dataloader import DataloaderBatchCallbacks
+from .sync_dataloader import DataloaderBatchCallbacks, SyncDataLoaderContext
 from .sync_future import SyncFuture
 
 PENDING_FUTURE = object()
@@ -49,7 +49,8 @@ class DeferredExecutionContext(ExecutionContext):
         self, operation: OperationDefinitionNode, root_value: Any
     ) -> Optional[AwaitableOrValue[Any]]:
         with DataloaderBatchCallbacks():
-            result = super().execute_operation(operation, root_value)
+            with SyncDataLoaderContext():
+                result = super().execute_operation(operation, root_value)
 
         if isinstance(result, SyncFuture):
             if not result.done():

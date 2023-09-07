@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "graphql-sync-dataloaders"
-version = "0.1.1"
+version = "0.1.2"
 description = "Use DataLoaders in your Python GraphQL servers that have to run in a sync context (i.e. Django)."
 authors = ["Jonathan Kim <hello@jkimbo.com>"]
 license = "MIT"

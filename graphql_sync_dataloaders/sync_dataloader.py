@@ -41,40 +41,70 @@ class DataloaderBatchCallbacks:
             callbacks.pop(0)()
 
 
-class SyncDataLoader:
-    def __init__(self, batch_load_fn):
-        self._batch_load_fn = batch_load_fn
+_scoped_data_loaders: contextvars.ContextVar[
+    Optional["SyncDataLoaderContext"]
+] = contextvars.ContextVar("sync_data_loaders", default=None)
+
+
+class DataLoaderStorage:
+    def __init__(self, _batch_load_fn):
         self._cache = {}
         self._queue = []
+        self._batch_load_fn = _batch_load_fn
 
-    def load(self, key):
+
+class SyncDataLoaderContext:
+    _token = None
+
+    loaders_dict = {}
+
+    def __enter__(self):
+        self._token = _scoped_data_loaders.set(self)
+    
+    def __exit__(self, exc_type, exc_value, traceback):
+        _scoped_data_loaders.reset(self._token)
+
+    def __init__(self):
+        self._loaders_dict = {}
+    
+    def _get_entry(self, instance):
+        entry = self._loaders_dict.get(instance, None)
+        if not entry:
+            entry = DataLoaderStorage(instance._batch_load_fn)
+            self._loaders_dict[instance] = entry
+        return entry
+    
+    def load(self, instance, key):
+        entry = self._get_entry(instance)
         try:
-            return self._cache[key]
+            return entry._cache[key]
         except KeyError:
             future = SyncFuture()
-            needs_dispatch = not self._queue
-            self._queue.append((key, future))
+            needs_dispatch = not entry._queue
+            entry._queue.append((key, future))
             if needs_dispatch:
                 batch_callbacks = _dataloader_batch_callbacks.get()
                 if batch_callbacks is None:
                     raise RuntimeError(
                         "DeferredExecutionContext not properly configured"
                     )
-                batch_callbacks.add_callback(self.dispatch_queue)
-            self._cache[key] = future
+                batch_callbacks.add_callback(lambda: self.dispatch_queue(instance))
+            entry._cache[key] = future
             return future
-
-    def clear(self, key):
-        self._cache.pop(key, None)
-
-    def dispatch_queue(self):
-        queue = self._queue
+    
+    def clear(self, instance, key):
+        entry = self._get_entry(instance)
+        entry._cache.pop(key, None)
+    
+    def dispatch_queue(self, instance):
+        entry = self._get_entry(instance)
+        queue = entry._queue
         if not queue:
             return
-        self._queue = []
+        entry._queue = []
 
         keys = [item[0] for item in queue]
-        values = self._batch_load_fn(keys)
+        values = entry._batch_load_fn(keys)
         if not is_collection(values) or len(keys) != len(values):
             raise ValueError("The batch loader does not return an expected result")
 
@@ -86,6 +116,24 @@ class SyncDataLoader:
                     future.set_result(value)
         except Exception as error:
             for key, future in queue:
-                self.clear(key)
+                self.clear(instance, key)
                 if not future.done():
                     future.set_exception(error)
+
+
+class SyncDataLoader:
+    def __init__(self, batch_load_fn):
+        self._batch_load_fn = batch_load_fn
+
+    def get_loader(self):
+        loader = _scoped_data_loaders.get()
+        return loader
+
+    def load(self, key):
+        loader = self.get_loader()
+        return loader.load(self, key)
+
+    def clear(self, key):
+        loader = self.get_loader()
+        return loader.clear(self, key)
+
