@@ -48,8 +48,8 @@ class DeferredExecutionContext(ExecutionContext):
     def execute_operation(
         self, operation: OperationDefinitionNode, root_value: Any
     ) -> Optional[AwaitableOrValue[Any]]:
-        with DataloaderBatchCallbacks():
-            with SyncDataLoaderContext():
+        with SyncDataLoaderContext():
+            with DataloaderBatchCallbacks():
                 result = super().execute_operation(operation, root_value)
 
         if isinstance(result, SyncFuture):

@@ -52,6 +52,32 @@ class DataLoaderStorage:
         self._queue = []
         self._batch_load_fn = _batch_load_fn
 
+    def clear(self, key):
+        self._cache.pop(key, None)
+
+    def dispatch_queue(self):
+        queue = self._queue
+        if not queue:
+            return
+        self._queue = []
+
+        keys = [item[0] for item in queue]
+        values = self._batch_load_fn(keys)
+        if not is_collection(values) or len(keys) != len(values):
+            raise ValueError("The batch loader does not return an expected result")
+
+        try:
+            for (key, future), value in zip(queue, values):
+                if isinstance(value, Exception):
+                    future.set_exception(value)
+                else:
+                    future.set_result(value)
+        except Exception as error:
+            for key, future in queue:
+                self.clear(key)
+                if not future.done():
+                    future.set_exception(error)
+
 
 class SyncDataLoaderContext:
     _token = None
@@ -88,37 +114,14 @@ class SyncDataLoaderContext:
                     raise RuntimeError(
                         "DeferredExecutionContext not properly configured"
                     )
-                batch_callbacks.add_callback(lambda: self.dispatch_queue(instance))
+                batch_callbacks.add_callback(entry.dispatch_queue)
             entry._cache[key] = future
             return future
     
     def clear(self, instance, key):
         entry = self._get_entry(instance)
         entry._cache.pop(key, None)
-    
-    def dispatch_queue(self, instance):
-        entry = self._get_entry(instance)
-        queue = entry._queue
-        if not queue:
-            return
-        entry._queue = []
 
-        keys = [item[0] for item in queue]
-        values = entry._batch_load_fn(keys)
-        if not is_collection(values) or len(keys) != len(values):
-            raise ValueError("The batch loader does not return an expected result")
-
-        try:
-            for (key, future), value in zip(queue, values):
-                if isinstance(value, Exception):
-                    future.set_exception(value)
-                else:
-                    future.set_result(value)
-        except Exception as error:
-            for key, future in queue:
-                self.clear(instance, key)
-                if not future.done():
-                    future.set_exception(error)
 
 
 class SyncDataLoader:
